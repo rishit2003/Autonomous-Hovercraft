@@ -32,7 +32,7 @@ my_adc=ADCH;
 void adc_init_rev() {
   // ADC init
 
-  //---ADMUX=((0<<REFS1)|(0<<REFS0)); // set voltage refere as Aref
+  //---ADMUX=((0<<REFS1)|(1<<REFS0)); // set voltage refere as Aref
 
   ADMUX = ((1 << ADLAR) | (1<<MUX1)|(1<<MUX0) | (0 << REFS1) | (1 << REFS0));  // "left-aligned" result for easy 8-bit reading.
                                                                             // AVcc as Aref |(1<<REFS0)
