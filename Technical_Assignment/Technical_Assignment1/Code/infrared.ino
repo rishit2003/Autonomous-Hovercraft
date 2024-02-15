@@ -93,8 +93,10 @@ int main(void) {
   while (1) {
 
      read_adc();
-    Vin = (float)my_adc*5/256;
-    my_distance= (Vin-0.0857)/21.472;
+    Vin = (float)my_adc*5/256; // ADC value is left aligned. So we use only highest 8 bits. hence the 256 and not 1024
+
+
+    my_distance= (Vin-0.0857)/21.472;  // get the inverse distance to have a linear relationship between Voltage and Inverse distance. (From datasheet and plot from measurements)
 
     Serial.println(my_adc);
      Serial.print("voltage is: ");
