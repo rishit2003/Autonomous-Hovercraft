@@ -78,11 +78,11 @@ int main(void) {
   Serial.begin(9600);
 
 
-  //analogReference(DEFAULT);  //-------- to be modified
+  
 
   DDRB &= ~(1 << PC3);   //changing the direction of pin A3 to input and the rest unchanged
   PORTB &= ~(1 << PC3);  // disable pull-up resistor
-  //sei();
+  
 
 
   adc_init_rev();
