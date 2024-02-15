@@ -9,7 +9,7 @@
 #define F_CPU 16000000UL
 
   uint16_t my_adc;
-  float my_distance;
+  float my_distance; // inverse distance 
 
 float Vin;
 
