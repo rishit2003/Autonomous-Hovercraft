@@ -53,11 +53,7 @@ void adc_init_rev() {
 uint16_t read_adc() {
 
   uint8_t Low, High;
-  //ADMUX = (ADMUX & (ADC_VOLTAGE_REFERENCE_MASK)) | Pin;
-
-  //ADMUX = (ADMUX | ((pin - 14) & 0x07));  //----  |= instead
-                                          // Delay needed for the stabilization of the ADC input voltage
-  //_delay_us(10);
+  
   ADCSRA |= (1 << ADSC);  //start conversion
  // while (ADCSRA & (1 << ADSC))
 
@@ -67,7 +63,7 @@ uint16_t read_adc() {
   //wait conversion is complete
   Low = ADCL;
   High = ADCH;
-  	//return (High<<8) | Low;  // ------return ADCH
+  
   return HIGH;  // ------return ADCH
 }
 
