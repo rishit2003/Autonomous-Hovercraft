@@ -67,8 +67,7 @@ uint16_t read_adc() {
   return HIGH;  // ------return ADCH
 }
 
-//  This bit is set when an 
-// ADC conversion completes and the Data Registers are updated
+
 
 int main(void) {
 
