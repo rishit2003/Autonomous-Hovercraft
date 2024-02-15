@@ -13,18 +13,17 @@
 
 float Vin;
 
-
+// capture highest ADC 8 bits when interrupt triggered 
 ISR(ADC_vect) {
 
   // ADC conversion complete
   // Clear ADIF by writing one to it
     ADCSRA |= (1<<ADIF);
 
- //uint8_t adc_valueh = ADCH;
-//  uint8_t adc_valuel = ADCL;
-my_adc=ADCH;
+ 
+    my_adc=ADCH;
   
-  //counter++;  //how many measurement was done
+ 
    
 }
 
