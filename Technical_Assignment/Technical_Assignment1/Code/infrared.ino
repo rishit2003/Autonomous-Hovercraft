@@ -6,6 +6,8 @@
 #include "init_290.c"
 
 
+//------------------ data pin is A3 for IR sensor -------------------:
+
 #define F_CPU 16000000UL
 
   uint16_t my_adc;
