@@ -8,6 +8,9 @@
 // Constant for Timer1 50 Hz PWM (ICR mode)
 #define PWM_TOP 2500
 
+// cpu frequency
+#define F_CPU 16000000UL
+
 // Converter of [0;255] range of x to [0,PWM_top] range for OCR of Timer1 (16 bit)
 #define D1B(x) (uint16_t)(((x)*(uint32_t)(PWM_top))>>8)
 
@@ -49,7 +52,9 @@ void gpio_init() {
 
   DDRD=(1<<PD7)|(1<<PD6)|(1<<PD5)|(1<<PD4)|(1<<PD1); //Set PD1 (TX) and PD7-PD4 (power control) as outputs.
   PORTD=((1<<PD1)|(1<<PD2)|(1<<PD3)); // Set PD1(TX) to HIGH (idle) and enable pull-ups on PD3 and PD2.
-  sei(); 
+  sei();   // used to set I-bit in SREG
+           // I-bit: Global interrupt enable – this bit must be set in order for any 
+           //interrupt to function
 } //end gpio_init
 
 
@@ -68,9 +73,40 @@ void uart_init() { // TX and RX init with IRQ
   UCSR0C=(3<<UCSZ00); // Asynchronous UART, 8-N-1
 }// end UART init
 
+void uart_flush(void)
+{
+unsigned char dummy;
+while (UCSR0A & (1<<RXC0)) dummy = UDR0;
+}
 
+void uart_transmit_char(char data) {
+  // Wait for the transmit buffer to be empty
+  while (!(UCSR0A & (1 << UDRE0)));
+  // Put data into buffer, sends the data
+  UDR0 = data;
+}
+ 
+void uart_transmit_string( char* data) {
+  // Transmit each character in the string
+  while (*data != '\0')
+   {
+  uart_transmit_char(*data);
+    data++;
+  }
+}
 
+void timer2_init() { 
+  TCCR1A|=(1<<COM2A1)|(0<<COM2A0)|(1<<WGM21)|(1<<WGM20); // non-inv fast PWM on channel A PB3 or pin11
+  // TCCR1B &=~(1<<WGM22);
 
+  TCCR1A|=(1<<COM2B1)|(0<<COM2B0);
+  TCCR1B|=(1<<CS22)|(0<<CS21)|(0<<CS20);  //prescalar to 64
+   
+   //compare value for pwm
+  OCR1A=130; 
+  
+
+  }
 // ======= PWM0 and PWM1 control (16-bit timer1) ===================
 void timer1_50Hz_init(uint8_t en_IRQ) { //en_IRQ eanbles 
   TCCR1A|=(1<<COM1A1)|(1<<COM1B1); // non-inv PWM on channels A and B
@@ -100,7 +136,7 @@ void adc_init (uint8_t channel, uint8_t en_IRQ) {
   												// Sets ADC to the specified channel. Can be changed later.
   ADCSRA=(1<<ADEN); 
   if (en_IRQ) ADCSRA|=(1<<ADIE); // enable ADC Complete Interrupt. NOTE: the ISR MUST be defined!!!
-  ADCSRA|=(1<<ADPS0)|(1<<ADPS1)|(1<<ADPS2); // ADC clock prescaler
+  ADCSRA|=(1<<ADPS0)|(1<<ADPS1)|(1<<ADPS2); // ADC clock prescaler 128
   ADCSRA|=(1<<ADATE); // Continuosly running mode
   ADCSRA|=(1<<ADSC); // Start ADC
 }
@@ -111,8 +147,16 @@ TWSR=0; // no prescaler
 TWBR=(uint8_t)(((F_CPU/SCL_CLOCK)-16)>>1);  //setting SCL; must be >10 for stable operation
 }
 
-void send_trig(){
-  PORTB |= (1<<PB3);	//set trigPin high
-  _delay_us(10); // not sure about this!!!
-  PORTB &= ~(1<<PB3);		//set trigPin low again	
+
+
+void uart_send(unsigned char DataByte)
+{
+	while (!(UCSR0A & (1<<UDRE0)))
+  ;
+    //( UCSR0A & (1<<UDRE0)) == 0) {}; // Do nothing until UDR is ready
+	UDR0 = DataByte;
 }
+
+
+
+

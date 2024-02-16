@@ -10,4 +10,4 @@ void timer1_50Hz_init (uint8_t en_IRQ);
 void timer0_init ();
 void adc_init (uint8_t channel, uint8_t en_IRQ);
 void twi_init();
-void send_trig();
+void timer2_init_PB3();
