@@ -42,29 +42,22 @@ void onboard_LED_brightness_infrared(uint16_t adc_value) {
 ISR(ADC_vect) {
 
   // ADC conversion complete
-  // Clear ADIF by writing one to it
+ 
   ADCSRA |= (1 << ADIF);
-
-  //uint8_t adc_valueh = ADCH;
-  //  uint8_t adc_valuel = ADCL;
   my_adc = ADCH;
 
-  //counter++;  //how many measurement was done
+ 
 }
 
 
 void adc_init_rev() {
-  // ADC init
 
-  //---ADMUX=((0<<REFS1)|(1<<REFS0)); // set voltage refere as Aref
 
   ADMUX = ((1 << ADLAR) | (1 << MUX1) | (1 << MUX0) | (0 << REFS1) | (1 << REFS0));  // "left-aligned" result for easy 8-bit reading.
                                                                                      // AVcc as Aref |(1<<REFS0)
                                                                                      // Sets ADC to the specified channel. Can be changed later.
   ADCSRB = 0;                                                                        // ADTS[0-2]=0 - Free Running mode   		//---- new code added
   ADCSRA = (1 << ADEN) | (1 << ADIE);                                                //-----   |=                                                     //enable ADC
-
-  // ADCSRA |= (1 << ADIE);  // enable ADC Complete Interrupt. NOTE: the ISR MUST be defined!!!
 
   ADCSRA |= (1 << ADPS0) | (1 << ADPS1) | (1 << ADPS2);  // ADC clock prescaler 128 or sampling frequency
   ADCSRA |= (1 << ADATE);                                // Continuosly running mode //auto-triggering The ADC will start a conversion on a positive edge of
@@ -116,7 +109,7 @@ int main(void) {
   while (1) {
 
     read_adc();
-    Vin = (float)my_adc * 5 / 256;  // Vref should be 2.6 not 5 and we use 256 because we take the highest 8 bits for the ADC values (left aligned)
+    Vin = (float)my_adc * 2.6 / 256;  // Vref 2.6v and we use 256 because we take the highest 8 bits for the ADC values (left aligned)
      
     my_distance = (Vin - 0.0857) / 21.472;  //inverse distance estimated from plot on excel we did 
 
