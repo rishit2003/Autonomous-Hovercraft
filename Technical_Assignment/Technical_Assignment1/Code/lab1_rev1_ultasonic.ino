@@ -9,10 +9,9 @@
 //volatile unsigned int length;
 volatile int TimerOverflow = 0;
 int pinB5_status;
-//char my_buffer[10];
 
 #define F_CPU 16000000UL
-//#define PRESCALER 1
+#define PRESCALER 1
 
 
 
@@ -20,7 +19,7 @@ void D3_brightness_ultrasonic(float distance) {
   if (distance > 40) {
     OCR2A = 0;
   } else if ((distance <= 40) & (distance >= 15)) {
-    OCR2A = (255 - (float)distance * 6);   //PWM on the OC2A pin 
+    OCR2A = (255 - (float)distance * 6);   //PWM on the pin with OC2A 
   } else {
     OCR2A = 255;
   }
@@ -28,24 +27,18 @@ void D3_brightness_ultrasonic(float distance) {
 
 
 
-
-
 ISR(TIMER1_OVF_vect) {
   TimerOverflow++; /* Increment Timer Overflow count */
 }
 
-// ISR(TIMER1_CAPT_vect) {
-
-
-// }
 
 int main(void) {
   Serial.begin(9600);
 
-  DDRB |= (1 << PB5);    // Trig   onboard  yellow led
+  DDRB |= (1 << PB5);    // Trigger   onboard  yellow led
   DDRB &= ~(1 << PB0);   // Echo
-  PORTB &= ~(1 << PB0);  //making sure that internal pull-up resistor is not active.
-                         //char string[10];
+  PORTB &= ~(1 << PB0);  // making sure that internal pull-up resistor is not active.
+                        
   DDRB |= (1 << PB3);    //      red led
 
   long count;
@@ -55,9 +48,7 @@ int main(void) {
   TIMSK1 = (1 << TOIE1); /* Enable Timer1 overflow interrupts */
   TCCR1A = 0;            /* Set all bit to zero Normal operation */
 
-  //timer2_init();
 
-  //DDRB |= (1 << PB3);   // modified DDRD |= (1 << PB3);
 
   OCR2A = 100;
   TCCR2A = (1 << COM2A1) | (0 << COM2A0) | (1 << WGM21) | (1 << WGM20);   // fast pwm, non inverting mode
@@ -75,24 +66,23 @@ int main(void) {
     PORTB |= pinB5_status;  // get previous pin status before the triggering of the 10us pulse for the ultasonic sensor
 
 
-    TCNT1 = 0;         /* Clear Timer counter */
-    TCCR1B = 0x41;     /* Capture on rising edge, No prescaler*/
-    TIFR1 = 1 << ICF1; /* Clear ICP flag (Input Capture flag) */
-    TIFR1 = 1 << TOV1; /* Clear Timer Overflow flag */
+    TCNT1 = 0;         // Clear Timer counter 
+    TCCR1B = 0x41;     //Capture on rising edge, No prescaler
+    TIFR1 = 1 << ICF1; // Clear ICP flag (Input Capture flag)
+    TIFR1 = 1 << TOV1; // Clear Timer Overflow flag
 
-    /*Calculate width of Echo by Input Capture (ICP) */
-
-    while ((TIFR1 & (1 << ICF1)) == 0)
-      ;                /* Wait for rising edge */
-    TCNT1 = 0;         /* Clear Timer counter */
-    TCCR1B = 0x01;     /* Capture on falling edge, No prescaler */
-    TIFR1 = 1 << ICF1; /* Clear ICP flag (Input Capture flag) */
-    TIFR1 = 1 << TOV1; /* Clear Timer Overflow flag */
-    TimerOverflow = 0; /* Clear Timer overflow count */
+    // Calculate the width of Echo by Input Capture (ICP) 
 
     while ((TIFR1 & (1 << ICF1)) == 0)
-      ;                                     /* Wait for falling edge */
-    count = ICR1 + (65535 * TimerOverflow); /* Take count */
+      ;                // Wait for rising edge
+    TCNT1 = 0;         // Clear Timer counter
+    TCCR1B = 0x01;     // Capture on falling edge, No prescaler
+    TIFR1 = 1 << ICF1; // Clear ICP flag (Input Capture flag)
+    TIFR1 = 1 << TOV1; // Clear Timer Overflow flag
+    TimerOverflow = 0; // Clear Timer overflow count
+
+    while ((TIFR1 & (1 << ICF1)) == 0);   // Wait for the falling edge 
+    count = ICR1 + (65535 * TimerOverflow); // Take count
     //  if (count >= 37318 or count <= 13994) {
     //     PORTB |= 1 << 5;  // Writing HIGH to PB5
     //     //_delay_ms(1000);  // Delay of 1 Second
@@ -101,25 +91,20 @@ int main(void) {
     //    //_delay_ms(1000);     // Delay of 1 Second
     //   }
 
-    distance = (float)count * ((float)PRESCALER / F_CPU) * 17150;  // speed in cm per sec
+    //distance formula is approximated from a linear function found on a excel sheet after doing measurements
+    distance = (float)count * ((float)PRESCALER / F_CPU) * 17150;
     Serial.print(count);
     Serial.println();
 
     Serial.print(distance);
     Serial.println(" cm");
 
-    //uart_transmit_char("/n");
-    // uart_transmit_string("the  distance to the object is:");
-    // sprintf(my_buffer,"%.2f",distance);
-    // uart_transmit_string(my_buffer);
-    // uart_transmit_string(" cm");
-
     _delay_ms(10);
 
     D3_brightness_ultrasonic(distance);
 
 
-    // turnin the onboard yellow LED ON or OFF depending on specific range
+    // turning the onboard yellow LED ON or OFF depending on specific range
     if ((distance >= 40) | (distance <= 15)) {
 
       PORTB |= (1 << 5);  // Writing HIGH to PB5
