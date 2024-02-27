@@ -91,7 +91,7 @@ int main(void) {
     //    //_delay_ms(1000);     // Delay of 1 Second
     //   }
 
-    //distance formula is approximated from a linear function found on a excel sheet after doing measurements
+    
     distance = (float)count * ((float)PRESCALER / F_CPU) * 17150;
     Serial.print(count);
     Serial.println();
