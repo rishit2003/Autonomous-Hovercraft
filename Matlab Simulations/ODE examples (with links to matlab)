@@ -1,0 +1,68 @@
+%%%%%%% https://www.mathworks.com/help/symbolic/solve-a-single-differential-equation.html#bruif2h
+%%%%%%% First order linear ODE
+syms y(t);
+ode = diff(y,t) == t*y;
+cond = y(0) == 2;
+ySol(t) = dsolve(ode,cond);
+
+%%%%%%%% With I.C.
+syms a(t);
+ode = (diff(a,t)+a)^2 == 1;
+cond = a(0) == 0;
+aSol(t) = dsolve(ode,cond);
+
+%%%%%%% Non Linear ODE
+syms a1(x);
+Dy = diff(a1);
+
+ode = diff(a1,x,2) == cos(2*x)-a1;
+cond1 = a1(0) == 1;
+cond2 = Dy(0) == 0;
+conds = [cond1 cond2];
+ySol(x) = dsolve(ode,conds);
+ySol = simplify(ySol);
+
+%%%%%%%%%%%  2nd order ODE
+syms u(t) v(t);
+ode1 = diff(u) == 3*u + 4*v;
+ode2 = diff(v) == -4*u + 3*v;
+odes = [ode1; ode2];
+S = dsolve(odes);
+
+uSol(t) = S.u;
+vSol(t) = S.v;
+[uSol(t),vSol(t)] = dsolve(odes);
+cond1 = u(0) == 0;
+cond2 = v(0) == 0;
+conds = [cond1; cond2];
+[uSol(t),vSol(t)] = dsolve(odes,conds);
+
+fplot(uSol);
+hold on;
+fplot(vSol);
+grid on;
+legend('uSol','vSol','Location','best');
+
+
+%%%%%%%%%%    https://www.mathworks.com/help/symbolic/solve-a-system-of-differential-equations.html
+%%%%%%%%%%%%%%%% SYSEM OF ODE
+syms x(t) y(t);
+A = [1 2; -1 1];
+B = [1; t];
+Y = [x; y];
+odes = diff(Y) == A*Y + B;
+[xSol(t),ySol(t)] = dsolve(odes);
+xSol(t) = simplify(xSol(t))
+ySol(t) = simplify(ySol(t))
+
+C = Y(0) == [2;-1];
+[xSol(t),ySol(t)] = dsolve(odes,C)
+
+clf
+fplot(ySol)
+hold on
+fplot(xSol)
+grid on
+legend('ySol','xSol','Location','best')
+
+
