@@ -106,5 +106,5 @@ end
 end
 
 grid on
-legend('x1Sol','x2Sol','x3Sol','x4Sol','x5Sol','x6Sol','Location','best')
+legend('x1Sol','x2Sol','x','y','x5Sol','x6Sol','Location','best')
 
