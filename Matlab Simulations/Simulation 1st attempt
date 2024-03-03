@@ -1,15 +1,21 @@
 syms x1(t) x2(t) x3(t) x4(t) x5(t) x6(t);
+syms x(t) y(t);
 
 
 %constants
 m=5;
-Tu=4;
-degrees=00;
-Tr=RotationT(Tu, degrees);
+d=0.25;                 % distance of fan to center of mass
+length=0.5;
+width=0.3;
+
+F_fan=4;
+Rudder_angle=15;
+Tu=F_fan*cosd(Rudder_angle);
+Tr=F_fan*tand(Rudder_angle)*d;
 b1=5;
 b2=5;
 b3=5;
-I=2;
+I=5;
 
 %Initial Conditions
 ic1=0;
@@ -18,6 +24,8 @@ ic3=0;
 ic4=0;
 ic5=0;
 ic6=0;
+x=0;
+y=0;
 
 % Store initial conditions
 initial_conditions = [ic1; ic2; ic3; ic4; ic5; ic6];
@@ -35,6 +43,10 @@ t2=5;
 counter=0;
 
 while true
+
+    Tu=F_fan*cosd(Rudder_angle);
+    Tr=F_fan*tand(Rudder_angle)*d;
+
 % Define symbolic functions
     Y = [x1; x2; x3; x4; x5; x6];
     % Initial conditions
@@ -48,6 +60,16 @@ while true
     % Solve
     [x1Sol(t), x2Sol(t), x3Sol(t), x4Sol(t), x5Sol(t), x6Sol(t)] = dsolve(odes, C);
 
+    % Inertial Reference
+
+    M=[cos(x5Sol(t)/(length/2)) -sin(x5Sol(t)/(length/2)); sin(x5Sol(t)/(length/2)) cos(x5Sol(t)/(length/2))];
+    N=[x1Sol(t);x3Sol(t)];
+
+    L = M * N;
+    x = L(1);  
+    y = L(2); 
+
+
     % Store final values for initial conditions of next iteration
     final_values = [x1Sol(t2); x2Sol(t2); x3Sol(t2); x4Sol(t2); x5Sol(t2); x6Sol(t2)];
 
@@ -59,9 +81,9 @@ while true
     hold on
     fplot(x2Sol, [t1, t2],'r')
     hold on
-    fplot(x3Sol, [t1, t2],'y')
+    fplot(x, [t1, t2],'y')
     hold on
-    fplot(x4Sol, [t1, t2],'m')
+    fplot(y, [t1, t2],'m')
     hold on
     fplot(x5Sol, [t1, t2],'g')
     hold on
@@ -70,8 +92,8 @@ while true
 
 %%% ADD MORE INSTRUCTIONS HERE %%%%
 if counter==0
-Tu=0;
-Tr;
+F_fan=0;
+Rudder_angle=0;
 t1=5;
 t2=10;
 counter=counter+1;
@@ -86,7 +108,3 @@ end
 grid on
 legend('x1Sol','x2Sol','x3Sol','x4Sol','x5Sol','x6Sol','Location','best')
 
-
-function Tr = RotationT(power, degrees)
-    Tr=power*(tand(degrees));
-end
