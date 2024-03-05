@@ -1,0 +1,140 @@
+syms x1(t) x2(t) x3(t) x4(t) x5(t) x6(t);
+syms x(t) y(t);
+ 
+
+
+
+%constants
+m=0.8;
+d=0.20;                 % distance of fan to center of mass
+length=0.5;
+width=0.3;
+ 
+
+F_fan=1.2;
+Rudder_angle=15;
+Tu=F_fan*cosd(Rudder_angle);
+Tv=F_fan*sind(Rudder_angle);
+Tr=F_fan*sind(Rudder_angle)*d;
+b1=0.15;
+b2=0.15;
+b3=0.005;
+I=0.003;
+ 
+ 
+%Initial Conditions
+ic1=0;
+ic2=0;
+ic3=0;
+ic4=0;
+ic5=0;
+ic6=0;
+x=0;
+y=0;
+ 
+ 
+% Store initial conditions
+initial_conditions = [ic1; ic2; ic3; ic4; ic5; ic6];
+ 
+ 
+% Initialize variables to store final values
+final_values = initial_conditions;
+ 
+ 
+% System matrices based on professor's notes
+A = [0 1 0 0 0 0; 0 (-(b1*1)/m) 0 0 0 0; 0 0 0 1 0 0; 0 0 0 (-(b2*1)/m) 0 0; 0 0 0 0 0 1; 0 0 0 0 0 (-(b3*1)/I)];
+B = [0; Tu/m; 0; Tv/m; 0; Tr/I];
+
+t1=0;
+t2=2;
+ 
+ 
+counter=0;
+ 
+ 
+while true
+ 
+ 
+ Tu=F_fan*cosd(Rudder_angle);
+    Tv=F_fan*sind(Rudder_angle);
+    Tr=F_fan*sind(Rudder_angle)*d;
+ 
+ 
+% Define symbolic functions
+    Y = [x1; x2; x3; x4; x5; x6];
+    % Initial conditions
+    C = Y(t1) == initial_conditions;
+ 
+ 
+    B = [0; Tu/m; 0; Tv/m; 0; Tr/I];
+
+ 
+    % ODE equations
+    odes = diff(Y) == A*Y + B;
+ 
+ 
+    % Solve
+    [x1Sol(t), x2Sol(t), x3Sol(t), x4Sol(t), x5Sol(t), x6Sol(t)] = dsolve(odes, C);
+ 
+ 
+    % Inertial Reference
+ 
+ 
+    M=[cos(x5Sol(t)) -sin(x5Sol(t)); sin(x5Sol(t)) cos(x5Sol(t))];
+    N=[x1Sol(t);x3Sol(t)];
+ 
+ 
+    L = M * N;
+    x = L(1);  
+    y = L(2);
+ 
+ 
+ 
+ 
+    % Store final values for initial conditions of next iteration
+    final_values = [x1Sol(t2); x2Sol(t2); x3Sol(t2); x4Sol(t2); x5Sol(t2); x6Sol(t2)];
+ 
+ 
+    % Update initial conditions
+    initial_conditions = final_values;
+ 
+ 
+    % Graphs
+    fplot(x1Sol, [t1, t2],'b')
+    hold on
+    fplot(x2Sol, [t1, t2],'r')
+    hold on
+    fplot(x, [t1, t2],'y')
+    hold on
+    fplot(y, [t1, t2],'m')
+    hold on
+    fplot(x3Sol, [t1, t2],'b','LineStyle', '--')
+    hold on
+    fplot(x4Sol, [t1, t2],'r','LineStyle', '--')
+    hold on
+    fplot(x5Sol, [t1, t2],'g')
+    hold on
+    fplot(x6Sol, [t1, t2],'c')
+    hold on
+ 
+ 
+%%% ADD MORE INSTRUCTIONS HERE %%%%
+if counter==0
+F_fan=0;
+Rudder_angle=0;
+t1=2;
+t2=15;
+counter=counter+1;
+continue
+end
+if counter==1
+break
+end
+ 
+ 
+end
+ 
+ 
+grid on
+legend('xb','u','x','y','yb','v','phi','r','Location','best')
+%legend('x1Sol','x2Sol','x','y','x3Sol','x4Sol','x5Sol','x6Sol','Location','best')
