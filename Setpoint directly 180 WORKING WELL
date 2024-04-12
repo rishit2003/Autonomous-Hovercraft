@@ -1,0 +1,658 @@
+// I2C device class (I2Cdev) demonstration Arduino sketch for MPU6050 class using DMP (MotionApps v2.0)
+// 6/21/2012 by Jeff Rowberg <jeff@rowberg.net>
+// Updates should (hopefully) always be available at https://github.com/jrowberg/i2cdevlib
+//
+// Changelog:
+//      2019-07-08 - Added Auto Calibration and offset generator
+//       - and altered FIFO retrieval sequence to avoid using blocking code
+//      2016-04-18 - Eliminated a potential infinite loop
+//      2013-05-08 - added seamless Fastwire support
+//                 - added note about gyro calibration
+//      2012-06-21 - added note about Arduino 1.0.1 + Leonardo compatibility error
+//      2012-06-20 - improved FIFO overflow handling and simplified read process
+//      2012-06-19 - completely rearranged DMP initialization code and simplification
+//      2012-06-13 - pull gyro and accel data from FIFO packet instead of reading directly
+//      2012-06-09 - fix broken FIFO read sequence and change interrupt detection to RISING
+//      2012-06-05 - add gravity-compensated initial reference frame acceleration output
+//                 - add 3D math helper file to DMP6 example sketch
+//                 - add Euler output and Yaw/Pitch/Roll output formats
+//      2012-06-04 - remove accel offset clearing for better results (thanks Sungon Lee)
+//      2012-06-01 - fixed gyro sensitivity to be 2000 deg/sec instead of 250
+//      2012-05-30 - basic DMP initialization working
+ 
+/* ============================================
+I2Cdev device library code is placed under the MIT license
+Copyright (c) 2012 Jeff Rowberg
+ 
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+ 
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+ 
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+===============================================
+*/
+ #include <avr/io.h>
+#include <avr/interrupt.h>
+
+volatile unsigned int TimerOverflow = 0;
+volatile unsigned long time_start = 0;
+volatile unsigned long time_end = 0;
+volatile unsigned long length = 0;
+volatile float distance1 = 0;
+volatile float distance2=0;
+volatile const int maxRead=60;
+volatile unsigned int difference=0;
+volatile unsigned int rightCalc=0;
+volatile unsigned int leftCalc=0;
+volatile float k=0.2;
+double setpoint = 0;
+volatile int upwards=1;
+volatile int angleChange=0;
+volatile int ticks=0;
+
+
+//PINS USED, HS1: P13, HS2: P6, Servo: P9, Lift fan: P18 (PD4 is on P18 mistake in datasheet), Thrust Fan: P4
+#include <Servo.h> // library for micro servo
+//#include <NewPing.h> // library for the proximity sensor
+ 
+// I2Cdev and MPU6050 must be installed as libraries, or else the .cpp/.h files
+// for both classes must be in the include path of your project
+#include "I2Cdev.h"
+ 
+#include "MPU6050_6Axis_MotionApps20.h"
+//#include "MPU6050.h" // not necessary if using MotionApps include file
+ 
+// Arduino Wire library is required if I2Cdev I2CDEV_ARDUINO_WIRE implementation
+// is used in I2Cdev.h
+#if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
+    #include "Wire.h"
+#endif
+ 
+// class default I2C address is 0x68
+// specific I2C addresses may be passed as a parameter here
+// AD0 low = 0x68 (default for SparkFun breakout and InvenSense evaluation board)
+// AD0 high = 0x69
+MPU6050 mpu;
+//MPU6050 mpu(0x69); // <-- use for AD0 high
+ 
+/* =========================================================================
+   NOTE: In addition to connection 3.3v, GND, SDA, and SCL, this sketch
+   depends on the MPU-6050's INT pin being connected to the Arduino's
+   external interrupt #0 pin. On the Arduino Uno and Mega 2560, this is
+   digital I/O pin 2.
+ * ========================================================================= */
+ 
+/* =========================================================================
+   NOTE: Arduino v1.0.1 with the Leonardo board generates a compile error
+   when using Serial.write(buf, len). The Teapot output uses this method.
+   The solution requires a modification to the Arduino USBAPI.h file, which
+   is fortunately simple, but annoying. This will be fixed in the next IDE
+   release. For more info, see these links:
+ 
+   http://arduino.cc/forum/index.php/topic,109987.0.html
+   http://code.google.com/p/arduino/issues/detail?id=958
+ * ========================================================================= */
+ 
+ 
+ 
+// uncomment "OUTPUT_READABLE_QUATERNION" if you want to see the actual
+// quaternion components in a [w, x, y, z] format (not best for parsing
+// on a remote host such as Processing or something though)
+//#define OUTPUT_READABLE_QUATERNION
+ 
+// uncomment "OUTPUT_READABLE_EULER" if you want to see Euler angles
+// (in degrees) calculated from the quaternions coming from the FIFO.
+// Note that Euler angles suffer from gimbal lock (for more info, see
+// http://en.wikipedia.org/wiki/Gimbal_lock)
+//#define OUTPUT_READABLE_EULER
+ 
+// uncomment "OUTPUT_READABLE_YAWPITCHROLL" if you want to see the yaw/
+// pitch/roll angles (in degrees) calculated from the quaternions coming
+// from the FIFO. Note this also requires gravity vector calculations.
+// Also note that yaw/pitch/roll angles suffer from gimbal lock (for
+// more info, see: http://en.wikipedia.org/wiki/Gimbal_lock)
+#define OUTPUT_READABLE_YAWPITCHROLL
+ 
+// uncomment "OUTPUT_READABLE_REALACCEL" if you want to see acceleration
+// components with gravity removed. This acceleration reference frame is
+// not compensated for orientation, so +X is always +X according to the
+// sensor, just without the effects of gravity. If you want acceleration
+// compensated for orientation, us OUTPUT_READABLE_WORLDACCEL instead.
+//#define OUTPUT_READABLE_REALACCEL
+ 
+// uncomment "OUTPUT_READABLE_WORLDACCEL" if you want to see acceleration
+// components with gravity removed and adjusted for the world frame of
+// reference (yaw is relative to initial orientation, since no magnetometer
+// is present in this case). Could be quite handy in some cases.
+//#define OUTPUT_READABLE_WORLDACCEL
+ 
+// uncomment "OUTPUT_TEAPOT" if you want output that matches the
+// format used for the InvenSense teapot demo
+//#define OUTPUT_TEAPOT
+ 
+int servo_pin = 9;
+int trigger_pin = 3;
+int echo_pin = 2;
+ 
+#define INTERRUPT_PIN 2  // use pin 2 on Arduino Uno & most boards
+#define LED_PIN 13 // (Arduino is 13, Teensy is 11, Teensy++ is 6)
+bool blinkState = false;
+ 
+// MPU control/status vars
+bool dmpReady = false;  // set true if DMP init was successful
+uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
+uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
+uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
+uint16_t fifoCount;     // count of all bytes currently in FIFO
+uint8_t fifoBuffer[64]; // FIFO storage buffer
+ 
+// orientation/motion vars
+Quaternion q;           // [w, x, y, z]         quaternion container
+VectorInt16 aa;         // [x, y, z]            accel sensor measurements
+VectorInt16 aaReal;     // [x, y, z]            gravity-free accel sensor measurements
+VectorInt16 aaWorld;    // [x, y, z]            world-frame accel sensor measurements
+VectorFloat gravity;    // [x, y, z]            gravity vector
+float euler[3];         // [psi, theta, phi]    Euler angle container
+float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
+float  yprConvert=(ypr[0]* 180/M_PI);
+ 
+// packet structure for InvenSense teapot demo
+uint8_t teapotPacket[14] = { '$', 0x02, 0,0, 0,0, 0,0, 0,0, 0x00, 0x00, '\r', '\n' };
+ 
+ 
+ 
+// ================================================================
+// ===               INTERRUPT DETECTION ROUTINE                ===
+// ================================================================
+ 
+volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
+void dmpDataReady() {
+    mpuInterrupt = true;
+}
+ 
+ISR(TIMER1_CAPT_vect) {
+ 
+}
+ 
+// ================================================================
+// ===                      INITIAL SETUP                       ===
+// ================================================================
+double servo_lower_lim_deg = -90; //80
+double servo_upper_lim_deg = +90;  //120
+ 
+double old_tilt_deg = servo_lower_lim_deg; // initialize the previous tilt degree
+double cumulative_error = 0; // units are cm, this is needed for I-term in PID
+double previous_error = 0; // this is for D term in PID
+ 
+double Kp = 1.75;
+double Ki = 0.00;
+double Kd = 0.00;
+ 
+double pid(double yaw_degree) {
+  // input == angle from proximity sensor to ball
+  // output == new angle to move the servo motor to get ball closer to setpoint
+  // never let the ball get closer than 4 cm to the proximity sensor - else it isn't accurate
+ 
+  //setpoint = 0;
+  Serial.print("setpoint_deg:");
+  Serial.print(setpoint);
+  Serial.print(",");
+ 
+  double error = setpoint -yaw_degree;
+  Serial.print("error:");
+  Serial.print(error);
+  Serial.print(",");
+ 
+  double p_value = error * Kp;
+ 
+  double i_value = cumulative_error * Ki;
+ 
+  double d_value = (error - previous_error) * Kd;
+  // typically we would divide by the elapsed time as the D-term is checking the error rate
+  // so if the ball is moving really fast the wrong way (away from setpoint), the correction will be bigger than P-only
+ 
+  double pid_value = p_value + i_value + d_value;
+ 
+  Serial.print("pid_value:");
+  Serial.println(pid_value);
+ 
+  cumulative_error += error; // note that error can be + or -, this i term seeks to eliminate the offset when the P-only controller stalls
+  previous_error = error; // for the next cycle, remember what this cycle's error was
+  // map the pid value to a new angle for the servo to go to
+  double servo_range = servo_upper_lim_deg - servo_lower_lim_deg;
+  double new_servo_angle = map(pid_value, -1 * servo_range, servo_range, servo_lower_lim_deg, servo_upper_lim_deg);
+ 
+  // make sure that any curveballs don't make the servo try to go to an angle outside of its operating range
+  if (new_servo_angle > servo_upper_lim_deg) {
+    new_servo_angle = servo_upper_lim_deg;
+  }
+ 
+  if (new_servo_angle < servo_lower_lim_deg) {
+    new_servo_angle = servo_lower_lim_deg;
+  }
+ 
+  return new_servo_angle;
+}
+ 
+//NewPing sonar(trigger_pin, echo_pin, max_dist_cm); // init an object for the proximity sensor (input)
+//Servo myservo;  // create servo object to control
+ 
+void setup() {
+ 
+ 
+//--------------------------------------- servo
+   pinMode(9,OUTPUT);
+ 
+   TCCR1A = (1 << COM1A1);  // Set OC1A (PB1) as PWM output
+   TCCR1B = (1 << WGM13);   // PWM, Phase and Frequency Correct
+   ICR1 = 2500;              // Set TOP to generate a 50Hz PWM signal
+ 
+   TIMSK1 = (1 << ICIE1);   // Enable Input Capture Interrupt
+   TCCR1B |= ((1 << CS11) | (1 << CS10));  // Set prescaler to 64
+   //delay(1000);
+   OCR1A = 188;  //76=0   188=90    304 =180
+ 
+ 
+  //------------------------------fan
+ 
+ 
+ 
+    // join I2C bus (I2Cdev library doesn't do this automatically)
+    #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
+        Wire.begin();
+        Wire.setClock(400000); // 400kHz I2C clock. Comment this line if having compilation difficulties
+        Wire.setTimeout(3500);
+    #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
+        Fastwire::setup(400, true);
+    #endif
+ 
+    // initialize serial communication
+    // (115200 chosen because it is required for Teapot Demo output, but it's
+    // really up to you depending on your project)
+    Serial.begin(9600);
+    while (!Serial); // wait for Leonardo enumeration, others continue immediately
+ 
+    // NOTE: 8MHz or slower host processors, like the Teensy @ 3.3V or Arduino
+    // Pro Mini running at 3.3V, cannot handle this baud rate reliably due to
+    // the baud timing being too misaligned with processor ticks. You must use
+    // 38400 or slower in these cases, or use some kind of external separate
+    // crystal solution for the UART timer.
+ 
+    // initialize device
+    //Serial.println(F("Initializing I2C devices..."));
+    mpu.initialize();
+    pinMode(INTERRUPT_PIN, INPUT);
+ 
+    // verify connection
+    //Serial.println(F("Testing device connections..."));
+    //Serial.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
+//mpu.testConnection();
+ 
+    // wait for ready
+    //Serial.println(F("\nSend any character to begin DMP programming and demo: "));
+    //while (Serial.available() && Serial.read()); // empty buffer
+    //while (!Serial.available());                 // wait for data
+   // while (Serial.available() && Serial.read()); // empty buffer again
+ 
+    // load and configure the DMP
+    //Serial.println(F("Initializing DMP..."));
+    devStatus = mpu.dmpInitialize();
+ 
+    // supply your own gyro offsets here, scaled for min sensitivity
+    mpu.setXGyroOffset(220);
+    mpu.setYGyroOffset(76);
+    mpu.setZGyroOffset(-85);
+    mpu.setZAccelOffset(1788); // 1688 factory default for my test chip
+ 
+    // make sure it worked (returns 0 if so)
+    if (devStatus == 0) {
+        // Calibration Time: generate offsets and calibrate our MPU6050
+        mpu.CalibrateAccel(6);
+        mpu.CalibrateGyro(6);
+        mpu.PrintActiveOffsets();
+        // turn on the DMP, now that it's ready
+        //Serial.println(F("Enabling DMP..."));
+        mpu.setDMPEnabled(true);
+ 
+        // enable Arduino interrupt detection
+        //Serial.print(F("Enabling interrupt detection (Arduino external interrupt "));
+        //Serial.print(digitalPinToInterrupt(INTERRUPT_PIN));
+        //Serial.println(F(")..."));
+        attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), dmpDataReady, RISING);
+        mpuIntStatus = mpu.getIntStatus();
+ 
+        // set our DMP Ready flag so the main loop() function knows it's okay to use it
+        //Serial.println(F("DMP ready! Waiting for first interrupt..."));
+        dmpReady = true;
+ 
+ 
+DDRD |=(1<<PD4);
+PORTD |= (1<<PD4);
+ 
+DDRD |=(1<<PD6);
+PORTD |= (1<<PD6);
+  TCCR0A |= (1 << COM0A1) | (1 << WGM00); //| (1 << WGM01);  // Non-inverting mode
+  OCR0A = 180;
+  TCCR0B |= (1 << CS01)|(1<<CS00);
+ 
+ 
+        // get expected DMP packet size for later comparison
+        packetSize = mpu.dmpGetFIFOPacketSize();
+    } else {
+        // ERROR!
+        // 1 = initial memory load failed
+        // 2 = DMP configuration updates failed
+        // (if it's going to break, usually the code will be 1)
+        Serial.print(F("DMP Initialization failed (code "));
+        Serial.print(devStatus);
+        Serial.println(F(")"));
+    }
+ 
+    // configure LED for output
+    //pinMode(LED_PIN, OUTPUT);
+
+
+ // Serial.begin(9600);
+  DDRB |= (1 << PB5) | (1 << PB3); // Trig for both sensors
+  DDRD &= ~((1 << PD3) | (1 << PD2)); // Echo for both sensors
+  PORTB &= ~(1 << PB5) & ~(1 << PB3); // Ensure Trigger pins are low initially
+  PORTD |= (1 << PD3) | (1 << PD2); // Making sure that the internal pull-up resistors are not active
+
+  // Configure Timer 2 for ultrasonic sensors
+  TCCR2A = 0; // Normal operation
+  TCCR2B = (1 << CS22); // Prescaler 64
+  TIMSK2 |= (1 << TOIE2); // Enable Timer 2 overflow interrupt
+}
+
+ISR(TIMER2_OVF_vect) {
+  TimerOverflow++; // Increment Timer Overflow count
+}
+ 
+ 
+ 
+// ================================================================
+// ===                    MAIN PROGRAM LOOP                     ===
+// ================================================================
+ 
+void loop() {
+    OCR0A = 180;
+    if(setpoint==180){
+      OCR0A = 225;
+    }
+    // if programming failed, don't try to do anything
+    if (!dmpReady) return;
+    // read a packet from FIFO
+    if (mpu.dmpGetCurrentFIFOPacket(fifoBuffer)) { // Get the Latest packet
+        #ifdef OUTPUT_READABLE_QUATERNION
+            // display quaternion values in easy matrix form: w x y z
+            mpu.dmpGetQuaternion(&q, fifoBuffer);
+            Serial.print("quat\t");
+            Serial.print(q.w);
+            Serial.print("\t");
+            Serial.print(q.x);
+            Serial.print("\t");
+            Serial.print(q.y);
+            Serial.print("\t");
+            Serial.println(q.z);
+        #endif
+ 
+        #ifdef OUTPUT_READABLE_EULER
+            // display Euler angles in degrees
+            mpu.dmpGetQuaternion(&q, fifoBuffer);
+            mpu.dmpGetEuler(euler, &q);
+            Serial.print("euler\t");
+            Serial.print(euler[0] * 180/M_PI);
+            Serial.print("\t");
+            Serial.print(euler[1] * 180/M_PI);
+            Serial.print("\t");
+            Serial.println(euler[2] * 180/M_PI);
+        #endif
+ 
+        #ifdef OUTPUT_READABLE_YAWPITCHROLL
+            // display Euler angles in degrees
+            mpu.dmpGetQuaternion(&q, fifoBuffer);
+            mpu.dmpGetGravity(&gravity, &q);
+            mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+            Serial.print("ypr\t");
+            Serial.print(ypr[0] * 180/M_PI);
+            Serial.print("\t");
+            Serial.print(ypr[1] * 180/M_PI);
+            Serial.print("\t");
+            Serial.println(ypr[2] * 180/M_PI);
+        #endif
+ 
+ 
+        #ifdef OUTPUT_READABLE_REALACCEL
+            // display real acceleration, adjusted to remove gravity
+            mpu.dmpGetQuaternion(&q, fifoBuffer);
+            mpu.dmpGetAccel(&aa, fifoBuffer);
+            mpu.dmpGetGravity(&gravity, &q);
+            mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
+            Serial.print("areal\t");
+            Serial.print(aaReal.x);
+            Serial.print("\t");
+            Serial.print(aaReal.y);
+            Serial.print("\t");
+            Serial.println(aaReal.z);
+        #endif
+ 
+        #ifdef OUTPUT_READABLE_WORLDACCEL
+            // display initial world-frame acceleration, adjusted to remove gravity
+            // and rotated based on known orientation from quaternion
+            mpu.dmpGetQuaternion(&q, fifoBuffer);
+            mpu.dmpGetAccel(&aa, fifoBuffer);
+            mpu.dmpGetGravity(&gravity, &q);
+            mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
+            mpu.dmpGetLinearAccelInWorld(&aaWorld, &aaReal, &q);
+            Serial.print("aworld\t");
+            Serial.print(aaWorld.x);
+            Serial.print("\t");
+            Serial.print(aaWorld.y);
+            Serial.print("\t");
+            Serial.println(aaWorld.z);
+        #endif
+   
+        #ifdef OUTPUT_TEAPOT
+            // display quaternion values in InvenSense Teapot demo format:
+            teapotPacket[2] = fifoBuffer[0];
+            teapotPacket[3] = fifoBuffer[1];
+            teapotPacket[4] = fifoBuffer[4];
+            teapotPacket[5] = fifoBuffer[5];
+            teapotPacket[6] = fifoBuffer[8];
+            teapotPacket[7] = fifoBuffer[9];
+            teapotPacket[8] = fifoBuffer[12];
+            teapotPacket[9] = fifoBuffer[13];
+            Serial.write(teapotPacket, 14);
+            teapotPacket[11]++; // packetCount, loops at 0xFF on purpose
+        #endif
+
+ 
+            //Serial.print("yprrrrrrrrrrrrrrrrrrrrrrrr\t");
+           // Serial.print(ypr[0] * 180/M_PI);
+           if(ypr[0]<0&&setpoint==180){
+            ypr[0]=ypr[0]+2*M_PI;
+           }
+         
+ //---------------- STRAIGHT LINE TRAJECTORY----------------------
+double angle_corrected;
+//if (upwards == 1) {
+  angle_corrected = pid(ypr[0] * 180/M_PI); // For upward motion, use the current angle
+//} else if (upwards == 3) {
+//    angle_corrected = pid(180 + (ypr[0] * 180/M_PI)); // Rotate 180 degrees
+//} else if (upwards == 2) {
+//    angle_corrected = pid(90 + (ypr[0] * 180/M_PI)); // Rotate -90 degrees
+//} 
+//angle_corrected = pid(angleChange-(ypr[0] * 180/M_PI));
+OCR1A = (angle_corrected * 1.26) + 188; // Adjusting the angle to PWM range
+delay(100);
+
+ 
+          //---------------- STRAIGHT LINE TRAJECTORY 0 degree----------------------
+//          double angle_corrected=pid(ypr[0] * 180/M_PI);
+//          OCR1A=( angle_corrected)*(1.26)+188;
+//           //OCR1A=(ypr[0] * 180/M_PI)*(-1.26)+188;
+//           delay(100);
+ 
+           //---------------- STRAIGHT LINE TRAJECTORY 180 degrees----------------------
+           
+          //  if(ypr[0]>0){
+          //  OCR1A=(180-(ypr[0] * 180/M_PI))*1.26+188;
+          //  delay(100);
+          //  }
+          //  else {
+          //   OCR1A=(180+(ypr[0] * 180/M_PI))*(-1.26)+188;
+          //  delay(100);
+          //  }
+ 
+ 
+          //----------------- TURNING LEFT TRAJECTORY---------------------
+           
+             //delay(100);
+          //----------------- TURNING RIGHT TRAJECTORY---------------------
+            // OCR1A=(ypr[0] * 180/M_PI)*(-1.26)+188;
+            // delay(100);
+         
+ 
+ 
+ 
+ 
+        // blink LED to indicate activity
+       // blinkState = !blinkState;
+       // digitalWrite(LED_PIN, blinkState);
+    }
+     TCNT2 = 0; // Clear Timer counter
+  TimerOverflow = 0; // Clear Timer overflow count
+
+  PORTB |= (1 << PB5); // Trigger pulse for the first sensor
+  _delay_us(10);
+  PORTB &= ~(1 << PB5);
+
+  while (!(PIND & (1 << PD3))); // Wait for rising edge
+  time_start = TCNT2;
+  while (PIND & (1 << PD3)); // Wait for falling edge
+  time_end = TCNT2;
+  length = (time_end - time_start + (TimerOverflow * 256)) * 4; // Adjust for TimerOverflow
+  distance1 = length / 58.0; // Convert time to distance (cm)
+//delay(2000);
+  // Output distance to serial monitor
+//  Serial.print("Distance (Sensor 1): ");
+//  Serial.print(distance1);
+//  Serial.println(" cm");
+
+  // Second ultrasonic sensor (Echo on PD2, Trig on PB3)
+  TCNT2 = 0; // Clear Timer counter
+  TimerOverflow = 0; // Clear Timer overflow count
+
+  PORTB |= (1 << PB3); // Trigger pulse for the second sensor
+  _delay_us(10);
+  PORTB &= ~(1 << PB3);
+
+  while (!(PIND & (1 << PD2))); // Wait for rising edge
+  time_start = TCNT2;
+  while (PIND & (1 << PD2)); // Wait for falling edge
+  time_end = TCNT2;
+  length = (time_end - time_start + (TimerOverflow * 256)) * 4; // Adjust for TimerOverflow
+  distance2 = length / 58.0; // Convert time to distance (cm)
+
+  // Output distance to serial monitor
+//  Serial.print("Distance (Sensor 2): ");
+//  Serial.print(distance2);
+//  Serial.println(" cm");
+
+  // Servo control based on distance from both sensors
+  //OCR1A = 188; // Default position
+
+  Serial.println("ticks: ");
+  Serial.print(ticks);
+
+  difference=abs(distance1-distance2);
+rightCalc=(5.5*k*difference)+188;
+leftCalc=abs(188-(5.5*k*difference));
+
+
+
+  if (ticks>45 && distance1 > maxRead) {
+   //delay(25);
+    //OCR1A = 245;
+   //delay(250);   
+   //OCR1A = 303; // Max position right
+    setpoint=180;
+    //delay(750);
+    //OCR1A=180;
+    //delay(1250);
+    ticks=0;
+     // OCR0A = 220;
+    
+   
+//    if(distance1>maxRead){
+//      delay(250);
+//    OCR1A = 303; // Max position right
+//    delay(450);
+//    OCR1A = 188;
+//    delay(450);
+//upwards=upwards+1;
+//angleChange=angleChange+90;
+    
+  
+//    
+//      
+//    }  
+  }
+
+  
+
+  else if (ticks>45 && distance2 > maxRead) {
+ 
+   //delay(25);
+  //  OCR1A = 132;
+   //delay(250); 
+    //OCR1A = 76; // Max position left
+    //delay(750);
+     setpoint=0;
+     //OCR1A=180;
+    //delay(1250);
+    ticks=0;
+     // OCR0A = 220;
+//     if(distance1>maxRead){
+//      delay(250);
+//    OCR1A = 76; // Max position right
+//    delay(450);
+//    OCR1A = 188;
+//    delay(450);
+//upwards=upwards-1;
+//angleChange=angleChange-90;
+
+//    
+//      
+//    }
+  }
+
+
+//  else if(difference>10 && distance1>distance2 && rightCalc<304){
+//    delay(250);
+//    OCR1A=rightCalc;
+//   // delay(450);
+//  }
+//  else if(difference>10 && distance2>distance1 && leftCalc>75){
+//   delay(250);
+//    OCR1A=leftCalc;
+//   // delay(450);
+//  }
+
+//else {
+//  OCR1A = 188;
+//}
+ticks++;
+   }
