@@ -1,4 +1,6 @@
-# ENGR290_Fantastic6
+# Autonomous Hovercraft
 
-Welcome to the Fantastic 6 Team,this is the respository for the ENGR 290 Autonomous Hovercraft
+## In Action
+
+https://github.com/user-attachments/assets/5a87e032-c3d5-4d5c-9fd3-dc1846e5d196
 
